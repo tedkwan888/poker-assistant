@@ -25,7 +25,7 @@ jobs:
 
       - name: Build EXE
         run: |
-          pyinstaller --onefile --noconsole poker_client.py
+          pyinstaller --onefile poker_client.py
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
