@@ -204,6 +204,7 @@ def main():
     
     # Windows message loop for hotkeys
     user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
     WM_QUIT = 0x0012
     
     # Create a message-only window for hotkey messages
@@ -218,7 +219,7 @@ def main():
         ctypes.c_void_p       # LPARAM
     )
     wc.lpfnWndProc = WNDPROC(lambda h, m, w, l: 0)
-    wc.hInstance = user32.GetModuleHandleW(None)
+    wc.hInstance = kernel32.GetModuleHandleW(None)
     wc.lpszClassName = "PokerHotkeyClass"
     
     class_atom = user32.RegisterClassExW(ctypes.byref(wc))
