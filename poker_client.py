@@ -209,7 +209,15 @@ def main():
     # Create a message-only window for hotkey messages
     wc = WNDCLASSEX()
     wc.cbSize = ctypes.sizeof(WNDCLASSEX)
-    wc.lpfnWndProc = ctypes.WINFUNCTYPE(wintypes.LPARAM, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)(lambda h, m, w, l: 0)
+    # Window procedure - use ctypes raw types, not wintypes (which are already WinFunctionType)
+    WNDPROC = ctypes.WINFUNCTYPE(
+        ctypes.c_long,        # LRESULT (return type)
+        ctypes.c_void_p,      # HWND
+        ctypes.c_uint,        # UINT
+        ctypes.c_void_p,      # WPARAM
+        ctypes.c_void_p       # LPARAM
+    )
+    wc.lpfnWndProc = WNDPROC(lambda h, m, w, l: 0)
     wc.hInstance = user32.GetModuleHandleW(None)
     wc.lpszClassName = "PokerHotkeyClass"
     
