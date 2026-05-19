@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """
 Poker Assistant Windows Client
-Global hotkey -> screenshot -> send to server -> display result
+Uses Windows RegisterHotKey API for reliable global hotkeys in games.
 """
 
 import sys
 import os
 import time
-import logging
-import tempfile
+import struct
 import ctypes
-
+from ctypes import wintypes
+import tempfile
+import logging
 import pyautogui
-import pynput
-from pynput import keyboard
 import requests
+
+# Windows constants
+MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+WM_HOTKEY = 0x0312
+VK_G = ord('G')
+VK_M = ord('M')
 
 SERVER_URL = "http://183.179.89.122:5199"
 SCREENSHOT_DELAY = 0.3
@@ -33,6 +39,10 @@ logger = logging.getLogger(__name__)
 running = True
 last_screenshot_time = 0
 MIN_HOTKEY_INTERVAL = 3
+
+# Hotkey IDs
+HOTKEY_ID_CASH = 1
+HOTKEY_ID_MTT = 2
 
 def is_admin():
     try:
@@ -94,7 +104,7 @@ def format_analysis_response(result):
     advice = analysis.get('advice', '暂无建议')
     game_type = result.get('game_type', 'cash')
     icon = '🃏' if game_type == 'cash' else '🏆'
-    return f"{icon} 【{game_type.upper()} 分析结果】\n\n{advice}\n\nID: {result.get('id', 'N/A')}"
+    return f"{icon} 【{game_type.upper()}】\n\n{advice}\n\nID: {result.get('id', 'N/A')}"
 
 def handle_hotkey(game_type):
     global last_screenshot_time
@@ -105,93 +115,118 @@ def handle_hotkey(game_type):
     last_screenshot_time = current_time
     mode = "CASH" if game_type == 'cash' else "MTT"
     logger.info(f"=== {mode} HOTKEY TRIGGERED ===")
+    print(f"[{mode}] 正在截图...")
     time.sleep(SCREENSHOT_DELAY)
     img_path = take_screenshot()
     if not img_path:
         print("截图失败")
         return
+    print(f"[{mode}] 正在发送分析...")
     result = send_to_server(img_path, game_type)
     print(format_analysis_response(result))
 
-class HotkeyListener:
-    def __init__(self):
-        self.ctrl_pressed = False
-        self.shift_pressed = False
-        self.listener = None
+def register_hotkeys(user32, hwnd):
+    """Register Ctrl+Shift+G and Ctrl+Shift+M as global hotkeys"""
+    # Ctrl+Shift+G = Cash
+    if not user32.RegisterHotKey(hwnd, HOTKEY_ID_CASH, MOD_CONTROL | MOD_SHIFT, VK_G):
+        logger.error("Failed to register Ctrl+Shift+G")
+        print("⚠️  无法注册 Ctrl+Shift+G (可能被其他程序占用)")
+    else:
+        print("✅ Ctrl+Shift+G 已注册 (Cash)")
+    
+    # Ctrl+Shift+M = MTT
+    if not user32.RegisterHotKey(hwnd, HOTKEY_ID_MTT, MOD_CONTROL | MOD_SHIFT, VK_M):
+        logger.error("Failed to register Ctrl+Shift+M")
+        print("⚠️  无法注册 Ctrl+Shift+M (可能被其他程序占用)")
+    else:
+        print("✅ Ctrl+Shift+M 已注册 (MTT)")
 
-    def start(self):
-        def on_press(key):
-            try:
-                if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
-                    self.ctrl_pressed = True
-                elif key == keyboard.Key.shift_l or key == keyboard.Key.shift_r:
-                    self.shift_pressed = True
-                if self.ctrl_pressed and self.shift_pressed:
-                    if hasattr(key, 'char') and key.char:
-                        if key.char.lower() == 'g':
-                            handle_hotkey('cash')
-                        elif key.char.lower() == 'm':
-                            handle_hotkey('mtt')
-            except Exception as e:
-                logger.error(f"Hotkey press error: {e}")
-
-        def on_release(key):
-            try:
-                if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
-                    self.ctrl_pressed = False
-                elif key == keyboard.Key.shift_l or key == keyboard.Key.shift_r:
-                    self.shift_pressed = False
-            except:
-                pass
-
-        self.listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-        self.listener.start()
-        logger.info("Hotkey listener started")
-
-    def stop(self):
-        if self.listener:
-            self.listener.stop()
-
-def print_banner():
+def main():
+    global running
+    
     print("""
 ╔══════════════════════════════════════════════════════╗
 ║       POKER ASSISTANT - WINDOWS CLIENT              ║
 ╠══════════════════════════════════════════════════════╣
-║  Ctrl+Shift+G  ->  Cash Game 分析                   ║
-║  Ctrl+Shift+M  ->  MTT Tournament 分析              ║
+║  Ctrl+Shift+G  ->  Cash Game 分析                  ║
+║  Ctrl+Shift+M  ->  MTT Tournament 分析             ║
 ║                                                      ║
-║  Server:  183.179.89.122:5199                       ║
-║  Status:  Connected                                  ║
-╠══════════════════════════════════════════════════════╣
-║  Press Ctrl+C to exit                                ║
+║  Server:  """)
+    print(f"  {SERVER_URL}")
+    print("""║  按 Ctrl+C 退出                                       ║
 ╚══════════════════════════════════════════════════════╝
     """)
-
-def main():
-    global running
+    
     if not is_admin():
-        print("建议以管理员身份运行以确保热键正常工作")
-    pyautogui.FAILSAFE = False
-    pyautogui.PAUSE = 0.1
+        print("⚠️  建议以管理员身份运行以确保热键正常工作")
+    
+    # Check server connectivity
     try:
         response = requests.get(f"{SERVER_URL}/health", timeout=5)
         if response.status_code == 200:
-            print(f"Server connected: {SERVER_URL}")
+            print(f"✅ Server connected: {SERVER_URL}")
+        else:
+            print(f"⚠️  Server returned: {response.status_code}")
     except Exception as e:
-        print(f"Cannot connect to server: {e}")
+        print(f"❌ Cannot connect to server: {e}")
+        print(f"   请确保 server 正在运行")
         sys.exit(1)
-    listener = HotkeyListener()
-    listener.start()
-    print_banner()
-    print("等待热键按下...")
-    try:
-        while running:
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        print("\nExiting...")
-        running = False
-        listener.stop()
-        sys.exit(0)
+    
+    pyautogui.FAILSAFE = False
+    pyautogui.PAUSE = 0.1
+    
+    # Windows message loop for hotkeys
+    user32 = ctypes.windll.user32
+    WM_QUIT = 0x0012
+    
+    # Create a message-only window for hotkey messages
+    wc = wintypes.WNDCLASSEX()
+    wc.cbSize = struct.calcsize("IIIIIIIIIIII")
+    wc.lpfnWndProc = ctypes.WINFUNCTYPE(wintypes.LPARAM, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)(lambda h, m, w, l: 0)
+    wc.hInstance = user32.GetModuleHandleW(None)
+    wc.lpszClassName = "PokerHotkeyClass"
+    
+    class_atom = user32.RegisterClassExW(ctypes.byref(wc))
+    if not class_atom:
+        print("❌ 无法注册窗口类")
+        sys.exit(1)
+    
+    hwnd = user32.CreateWindowExW(
+        0, class_atom, "Poker Assistant",
+        0, 0, 0, 0, 0,
+        None, None, wc.hInstance, None
+    )
+    
+    if not hwnd:
+        print("❌ 无法创建窗口")
+        sys.exit(1)
+    
+    # Register hotkeys
+    register_hotkeys(user32, hwnd)
+    
+    print("\n等待热键按下... (切换到 GG Poker 窗口，按下 Ctrl+Shift+G 或 Ctrl+Shift+M)\n")
+    
+    # Message loop
+    msg = wintypes.MSG()
+    while running:
+        ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+        if ret == 0 or ret == -1:
+            break
+        
+        if msg.message == WM_HOTKEY:
+            if msg.wParam == HOTKEY_ID_CASH:
+                handle_hotkey('cash')
+            elif msg.wParam == HOTKEY_ID_MTT:
+                handle_hotkey('mtt')
+        else:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+    
+    # Cleanup
+    user32.UnregisterHotKey(hwnd, HOTKEY_ID_CASH)
+    user32.UnregisterHotKey(hwnd, HOTKEY_ID_MTT)
+    user32.DestroyWindow(hwnd)
+    print("\n退出。")
 
 if __name__ == '__main__':
     main()
