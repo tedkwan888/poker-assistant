@@ -7,7 +7,6 @@ Uses Windows RegisterHotKey API for reliable global hotkeys in games.
 import sys
 import os
 import time
-import struct
 import ctypes
 from ctypes import wintypes
 import tempfile
@@ -21,6 +20,34 @@ MOD_SHIFT = 0x0004
 WM_HOTKEY = 0x0312
 VK_G = ord('G')
 VK_M = ord('M')
+
+# Define WNDCLASSEX manually (not in ctypes.wintypes)
+class WNDCLASSEX(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint),
+        ("style", ctypes.c_uint),
+        ("lpfnWndProc", ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p)),
+        ("cbClsExtra", ctypes.c_int),
+        ("cbWndExtra", ctypes.c_int),
+        ("hInstance", ctypes.c_void_p),
+        ("hIcon", ctypes.c_void_p),
+        ("hCursor", ctypes.c_void_p),
+        ("hbrBackground", ctypes.c_void_p),
+        ("lpszMenuName", ctypes.c_void_p),
+        ("lpszClassName", ctypes.c_wchar_p),
+        ("hIconSm", ctypes.c_void_p),
+    ]
+
+# Define MSG manually for message loop
+class MSG(ctypes.Structure):
+    _fields_ = [
+        ("hwnd", ctypes.c_void_p),
+        ("message", ctypes.c_uint),
+        ("wParam", ctypes.c_void_p),
+        ("lParam", ctypes.c_void_p),
+        ("time", ctypes.c_ulong),
+        ("pt", ctypes.c_void_p),
+    ]
 
 SERVER_URL = "http://183.179.89.122:5199"
 SCREENSHOT_DELAY = 0.3
@@ -180,8 +207,8 @@ def main():
     WM_QUIT = 0x0012
     
     # Create a message-only window for hotkey messages
-    wc = wintypes.WNDCLASSEX()
-    wc.cbSize = struct.calcsize("IIIIIIIIIIII")
+    wc = WNDCLASSEX()
+    wc.cbSize = ctypes.sizeof(WNDCLASSEX)
     wc.lpfnWndProc = ctypes.WINFUNCTYPE(wintypes.LPARAM, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)(lambda h, m, w, l: 0)
     wc.hInstance = user32.GetModuleHandleW(None)
     wc.lpszClassName = "PokerHotkeyClass"
@@ -207,7 +234,7 @@ def main():
     print("\n等待热键按下... (切换到 GG Poker 窗口，按下 Ctrl+Shift+G 或 Ctrl+Shift+M)\n")
     
     # Message loop
-    msg = wintypes.MSG()
+    msg = MSG()
     while running:
         ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
         if ret == 0 or ret == -1:
